@@ -39,6 +39,8 @@ class Trias : public text_sensor::TextSensor, public PollingComponent {
         http_request::HttpRequestComponent *http_{nullptr};
         std::vector<Departure> departures;
         std::string stop_name;
+
+        std::string post_request(std::string, std::list<http_request::Header>);
 };
 
 

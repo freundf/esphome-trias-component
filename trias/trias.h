@@ -37,7 +37,7 @@ class Trias : public text_sensor::TextSensor, public PollingComponent {
         std::string stop_id_;
         time::RealTimeClock *time_{nullptr};
         http_request::HttpRequestComponent *http_{nullptr};
-        std::vector<Departure> departures;
+        std::vector<Departure> departures = {};
         std::string stop_name;
 
         std::string post_request(std::string, std::list<http_request::Header>);

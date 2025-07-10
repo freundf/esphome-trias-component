@@ -15,12 +15,16 @@ void parse_response(std::string body, std::vector<Departure> *departures, std::s
     using namespace tinyxml2;
     xml::parse_xml(body, [&](XMLElement *root) -> bool {
         auto get_time = [](XMLElement *stopEvent) -> ESPTime {
-            const char *time_string = stopEvent
+            XMLElement *service_departure = stopEvent
                 ->FirstChildElement("StopEvent")
                 ->FirstChildElement("ThisCall")
                 ->FirstChildElement("CallAtStop")
-                ->FirstChildElement("ServiceDeparture")
-                ->FirstChildElement("TimetabledTime")->GetText();
+                ->FirstChildElement("ServiceDeparture");
+            XMLElement *timeElement = service_departure->FirstChildElement("EstimatedTime");
+            if (timeElement == nullptr) {
+                timeElement = service_departure->FirstChildElement("TimetabledTime");
+            }
+            const char *time_string = timeElement->GetText();
 
             struct tm tm { .tm_isdst = -1 };
             strptime(time_string, "%Y-%m-%dT%H:%M:%SZ", &tm);
@@ -104,6 +108,10 @@ void Trias::update() {
 
     this->departures.clear();
     parse_response(response, &this->departures, &this->stop_name);
+    if (departures.empty()) {
+        ESP_LOGI(TAG, "no departures found");
+        return;
+    }
     this->publish_state(
         this->departures[0].line + " -> " +
         this->departures[0].destination + ", " +
@@ -118,6 +126,7 @@ void Trias::change_stop(std::string stop_name) {
     const std::list<http_request::Header> header = { { "Content-Type", "application/xml" } };
     std::string response = this->post_request(body, header);
     parse_stop_response(response, &this->stop_id_);
+    ESP_LOGI(TAG, "changed stop to %s", this->stop_id_.c_str());
 }
 
 std::string Trias::post_request(std::string body, std::list<http_request::Header> headers) {

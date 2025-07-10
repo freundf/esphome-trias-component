@@ -12,6 +12,10 @@ struct Departure {
     std::string line;
     std::string destination;
     ESPTime time;
+    std::string bay;
+    std::string route;
+    std::string service_type;
+
 
     auto operator<=>(const Departure&) const = default;
 };

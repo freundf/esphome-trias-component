@@ -11,68 +11,86 @@ namespace trias {
 
 static const char *const TAG = "trias";
 
-void parse_response(std::string body, std::vector<Departure> *departures, std::string *stop_name) {
+ESPTime parse_time(std::string time_string) {
+    struct tm tm { .tm_isdst = -1 };
+    strptime(time_string.c_str(), "%Y-%m-%dT%H:%M:%SZ", &tm);
+    auto offset = ESPTime::timezone_offset();
+    time_t epoch = mktime(&tm) + offset;
+
+    return ESPTime::from_epoch_local(epoch);
+}
+
+trias::Departure parse_stop_event_result(tinyxml2::XMLElement *stop_event_result) {
+    using namespace tinyxml2;
+    Departure dep;
+    XMLElement *call_at_stop = stop_event_result
+        ->FirstChildElement("StopEvent")
+        ->FirstChildElement("ThisCall")
+        ->FirstChildElement("CallAtStop");
+
+    XMLElement *service = stop_event_result
+        ->FirstChildElement("StopEvent")
+        ->FirstChildElement("Service");
+
+    dep.line = service
+        ->FirstChildElement("PublishedLineName")
+        ->FirstChildElement("Text")->GetText();
+
+    dep.destination = service
+        ->FirstChildElement("DestinationText")
+        ->FirstChildElement("Text")->GetText();
+
+    dep.time = parse_time([](XMLElement *elem) -> std::string {
+        auto time_elem = elem
+            ->FirstChildElement("ServiceDeparture")
+            ->FirstChildElement("EstimatedTime");
+        if (!time_elem) {
+            time_elem = elem
+                ->FirstChildElement("ServiceDeparture")
+                ->FirstChildElement("TimetabledTime");
+        }
+        return time_elem->GetText();
+    }(call_at_stop));
+
+    dep.bay = call_at_stop
+        ->FirstChildElement("PlannedBay")
+        ->FirstChildElement("Text")->GetText();
+
+    dep.route = service
+        ->FirstChildElement("RouteDescription")
+        ->FirstChildElement("Text")->GetText();
+
+    dep.service_type = service
+        ->FirstChildElement("Mode")
+        ->FirstChildElement("Name")
+        ->FirstChildElement("Text")->GetText();
+
+    return dep;
+}
+
+
+void parse_stop_event_response(std::string body, std::vector<Departure> *departures, std::string *stop_name) {
     using namespace tinyxml2;
     xml::parse_xml(body, [&](XMLElement *root) -> bool {
-        auto get_time = [](XMLElement *stopEvent) -> ESPTime {
-            XMLElement *service_departure = stopEvent
-                ->FirstChildElement("StopEvent")
-                ->FirstChildElement("ThisCall")
-                ->FirstChildElement("CallAtStop")
-                ->FirstChildElement("ServiceDeparture");
-            XMLElement *timeElement = service_departure->FirstChildElement("EstimatedTime");
-            if (timeElement == nullptr) {
-                timeElement = service_departure->FirstChildElement("TimetabledTime");
-            }
-            const char *time_string = timeElement->GetText();
-
-            struct tm tm { .tm_isdst = -1 };
-            strptime(time_string, "%Y-%m-%dT%H:%M:%SZ", &tm);
-            auto offset = ESPTime::timezone_offset();
-            time_t epoch = mktime(&tm) + offset;
-
-            return ESPTime::from_epoch_local(epoch);
-        };
-
-        auto get_line_name = [](XMLElement *stopEvent) -> std::string {
-            return stopEvent
-                ->FirstChildElement("StopEvent")
-                ->FirstChildElement("Service")
-                ->FirstChildElement("PublishedLineName")
-                ->FirstChildElement("Text")->GetText();
-        };
-
-        auto get_stop_name = [](XMLElement *stopEvent) -> std::string {
-            return stopEvent
-                ->FirstChildElement("StopEvent")
-                ->FirstChildElement("ThisCall")
-                ->FirstChildElement("CallAtStop")
-                ->FirstChildElement("StopPointName")
-                ->FirstChildElement("Text")->GetText();
-        };
-
-        auto get_destination_name = [](XMLElement *stopEvent) -> std::string {
-            return stopEvent
-                ->FirstChildElement("StopEvent")
-                ->FirstChildElement("Service")
-                ->FirstChildElement("DestinationText")
-                ->FirstChildElement("Text")->GetText();
-        };
-
         auto *result = root
             ->FirstChildElement("ServiceDelivery")
             ->FirstChildElement("DeliveryPayload")
             ->FirstChildElement("StopEventResponse")
             ->FirstChildElement("StopEventResult");
 
+        auto get_stop_name([](XMLElement *elem) -> std::string {
+            return elem
+                ->FirstChildElement("StopEvent")
+                ->FirstChildElement("ThisCall")
+                ->FirstChildElement("CallAtStop")
+                ->FirstChildElement("StopPointName")
+                ->FirstChildElement("Text")->GetText();
+        });
+
         *stop_name = get_stop_name(result);
 
         do {
-            auto time = get_time(result);
-            auto line = get_line_name(result);
-            auto destination = get_destination_name(result);
-
-            departures->push_back({line, destination, time});
+            departures->push_back(parse_stop_event_result(result));
         } while (result = result->NextSiblingElement("StopEventResult"));
         return true;
     });
@@ -107,11 +125,16 @@ void Trias::update() {
     std::string response = this->post_request(body, header);
 
     this->departures.clear();
-    parse_response(response, &this->departures, &this->stop_name);
+    parse_stop_event_response(response, &this->departures, &this->stop_name);
     if (departures.empty()) {
         ESP_LOGI(TAG, "no departures found");
         return;
     }
+
+    std::sort(this->departures.begin(), this->departures.end(), [](Departure &a, Departure &b) {
+        return a.time < b.time;
+    });
+
     this->publish_state(
         this->departures[0].line + " -> " +
         this->departures[0].destination + ", " +

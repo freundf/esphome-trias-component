@@ -15,6 +15,7 @@ inline std::string stop_event_request(std::string time, std::string ref, std::st
     "        </Location>\n"
     "        <Params>\n"
     "          <NumberOfResults>4</NumberOfResults>\n"
+    "          <IncludeRealtimeData>true</IncludeRealtimeData>\n"
     "        </Params>\n"
     "      </StopEventRequest>\n"
     "    </RequestPayload>\n"

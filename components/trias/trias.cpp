@@ -52,9 +52,14 @@ trias::Departure parse_stop_event_result(tinyxml2::XMLElement *stop_event_result
         return time_elem->GetText();
     }(call_at_stop));
 
-    dep.bay = call_at_stop
-        ->FirstChildElement("PlannedBay")
-        ->FirstChildElement("Text")->GetText();
+    auto planned_bay = call_at_stop
+        ->FirstChildElement("PlannedBay");
+    if (planned_bay) {
+        dep.bay = planned_bay
+            ->FirstChildElement("Text")->GetText();
+    } else {
+        dep.bay = "";
+    }
 
     dep.route = service
         ->FirstChildElement("RouteDescription")
